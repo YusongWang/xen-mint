@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"strings"
 	"time"
 
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -241,18 +241,48 @@ func batch_mint(start, count int) {
 	if err != nil {
 		panic(err)
 	}
+	type Wallet struct {
+		Id      int
+		Private string
+	}
 
-	var wallets_privatekey []string
+	var wg sync.WaitGroup
+	wg.Add(len(dbkeys))
+	walletChan := make(chan Wallet, 1000)
+	//var wallets_privatekey []string
 	for idx := range dbkeys {
-		wallets_privatekey = append(wallets_privatekey, dbkeys[idx].PrivateKey)
+		var w Wallet
+		w.Id = idx
+		w.Private = dbkeys[idx].PrivateKey
+		walletChan <- w
+		//wallets_privatekey = append(wallets_privatekey, dbkeys[idx].PrivateKey)
 	}
 
-	for idx := range wallets_privatekey {
-		if err := mint(idx, strings.TrimPrefix(wallets_privatekey[idx], "0x")); err != nil {
-			fmt.Println("at count panic  plase start with this index ", idx)
-			panic(err)
-		}
+	var faild_number uint64
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go func() {
+			for {
+				select {
+				case wallet := <-walletChan:
+					if err := mint(wallet.Id, strings.TrimPrefix(wallet.Private, "0x")); err != nil {
+						fmt.Println("at count panic  plase start with this index ", wallet.Private)
+						faild_number = faild_number + 1
+						fmt.Printf("faild at %d privateKey is: %s \n", wallet.Id, wallet.Private)
+					}
+					wg.Done()
+				}
+			}
+		}()
 	}
+
+	fmt.Println("faild", faild_number)
+	wg.Wait()
+	// for idx := range wallets_privatekey {
+	// 	if err := mint(idx, strings.TrimPrefix(wallets_privatekey[idx], "0x")); err != nil {
+	// 		fmt.Println("at count panic  plase start with this index ", idx)
+	// 		panic(err)
+	// 	}
+	// }
 }
 
 func NewKey() (Key, error) {
@@ -397,7 +427,7 @@ func batch_trasfer(start, count int) {
 
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0).Mul(big.NewInt(1500000000000000), big.NewInt(int64(count))) // in wei
-	auth.GasLimit = uint64(3000000)                                                        // in units
+	auth.GasLimit = uint64(300000)                                                         // in units
 	auth.GasPrice = gasPrice
 
 	_, err = batchTrasfer.Transfer(auth, wallets, big.NewInt(1500000000000000))
@@ -583,7 +613,7 @@ func GenesisTs() {
 		panic(err)
 	}
 
-	mints, err := like.GenesisTs(&bind.CallOpts{})
+	mints, err := like.GlobalRank(&bind.CallOpts{})
 	if err != nil {
 		panic(err)
 	}
