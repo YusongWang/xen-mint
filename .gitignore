@@ -1,0 +1,5 @@
+wallet-mint
+.env
+/vendor
+keys.db
+
