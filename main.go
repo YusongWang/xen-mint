@@ -3,20 +3,32 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+
 	"fmt"
+	"log"
 	"math/big"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/caarlos0/env/v6"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/joho/godotenv"
+	"github.com/urfave/cli/v2"
 )
+
+type config struct {
+	ChainApi   string `env:"URL"`
+	PrivateKey string `env:"PRIVATEKEY,unset"`
+}
 
 type Key struct {
 	ID         uint   `gorm:"column:id;primarykey"`
@@ -26,6 +38,143 @@ type Key struct {
 
 func (Key) TableName() string {
 	return "keys"
+}
+
+var cfg config
+
+func main() {
+	godotenv.Load()
+	if err := env.Parse(&cfg); err != nil {
+		fmt.Printf("%+v\n", err)
+		os.Exit(1)
+	}
+
+	app := &cli.App{
+		Commands: []*cli.Command{
+			{
+				Name:    "wallet",
+				Aliases: []string{"c"},
+				Usage:   "create wallets",
+				Action: func(cCtx *cli.Context) error {
+					if cCtx.Args().Len() < 2 {
+						fmt.Println("Args less then 2, first is dbnamne,seced is wallet count")
+						os.Exit(0)
+					}
+					db_name := cCtx.Args().First()
+					count_str := cCtx.Args().Get(1)
+					count, err := strconv.Atoi(count_str)
+					if err != nil {
+						fmt.Println("error: ", err)
+						//ExitProcess()
+						os.Exit(0)
+					}
+
+					create_wallets(db_name, count)
+					//fmt.Println("added task: ", cCtx.Args().First())
+					fmt.Println("Create success..")
+					return nil
+				},
+			},
+			{
+				Name:    "mint",
+				Aliases: []string{"m"},
+				Usage:   "mint LIKE on bsc",
+				Action: func(cCtx *cli.Context) error {
+					if cCtx.Args().Len() < 2 {
+						fmt.Println("Args less then 2, first is dbnamne,seced is wallet count")
+						os.Exit(0)
+					}
+					db_name := cCtx.Args().First()
+					start_str := cCtx.Args().Get(1)
+					start, err := strconv.Atoi(start_str)
+					if err != nil {
+						fmt.Println("error: ", err)
+						//ExitProcess()
+						os.Exit(0)
+					}
+					if start <= 10 {
+						start = 1000
+					}
+
+					count_str := cCtx.Args().Get(2)
+					count, err := strconv.Atoi(count_str)
+					if err != nil {
+						fmt.Println("error: ", err)
+						//ExitProcess()
+						os.Exit(0)
+					}
+
+					openDatabase(db_name)
+					batch_mint(start, count)
+					fmt.Printf("success for mint %d wallet address\n", count)
+					return nil
+				},
+			},
+			{
+				Name:    "transfer",
+				Aliases: []string{"t"},
+				Usage:   "Use one Wallet and transfer BNB to all address. Max Count is 50",
+				Action: func(cCtx *cli.Context) error {
+					if cCtx.Args().Len() < 2 {
+						fmt.Println("Args less then 2, first is dbnamne,seced is wallet count")
+						os.Exit(0)
+					}
+					db_name := cCtx.Args().First()
+					start_str := cCtx.Args().Get(1)
+					start, err := strconv.Atoi(start_str)
+					if err != nil {
+						fmt.Println("error: ", err)
+						//ExitProcess()
+						os.Exit(0)
+					}
+					if start <= 10 {
+						start = 1000
+					}
+
+					count_str := cCtx.Args().Get(2)
+					count, err := strconv.Atoi(count_str)
+					if err != nil {
+						fmt.Println("error: ", err)
+						//ExitProcess()
+						os.Exit(0)
+					}
+
+					openDatabase(db_name)
+					batch_trasfer(start, count)
+
+					fmt.Printf("success for transfer %d wallet address\n", count)
+					return nil
+				},
+			},
+		},
+	}
+
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
+
+	//batch_mint()
+	//batch_trasfer()
+}
+
+func batch_mint(start, count int) {
+	kdb := Keys{}
+	dbkeys, err := kdb.Scan(start, count)
+	if err != nil {
+		panic(err)
+	}
+
+	var wallets_privatekey []string
+	for idx := range dbkeys {
+		wallets_privatekey = append(wallets_privatekey, dbkeys[idx].PrivateKey)
+	}
+
+	for idx := range wallets_privatekey {
+		if err := mint(idx, strings.TrimPrefix(wallets_privatekey[idx], "0x")); err != nil {
+			fmt.Println("at count panic  plase start with this index ", idx)
+			panic(err)
+		}
+	}
 }
 
 func NewKey() (Key, error) {
@@ -49,48 +198,14 @@ func NewKey() (Key, error) {
 	return Key{Address: address.Hex(), PrivateKey: privateKeyHex}, nil
 }
 
-const MY_STAET_SIZE = 451
-const MY_BATCH_SIZE = 50
-
-func main() {
-	batch_mint()
-	//batch_trasfer()
-}
-
-func batch_mint() {
-	kdb := Keys{}
-	dbkeys, err := kdb.Scan(MY_STAET_SIZE, MY_BATCH_SIZE)
-	if err != nil {
-		panic(err)
-	}
-
-	var wallets_privatekey []string
-	for idx := range dbkeys {
-		wallets_privatekey = append(wallets_privatekey, dbkeys[idx].PrivateKey)
-	}
-
-	for idx := range wallets_privatekey {
-		fmt.Println(wallets_privatekey[idx])
-
-		if err := mint(idx, strings.TrimPrefix(wallets_privatekey[idx], "0x")); err != nil {
-			fmt.Println("at Idx Panic ", idx)
-			panic(err)
-		}
-	}
-
-	//NewBatchTrasferTransactor(address common.Address, transactor bind.ContractTransactor)
-}
-
 func mint(idx int, privateKeyStr string) error {
 	key := privateKeyStr
-	fmt.Println(key)
 	privateKey, err := crypto.HexToECDSA(key)
 	if err != nil {
 		fmt.Println(err)
 		panic(err)
 	}
 
-	fmt.Println("Key init")
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -99,7 +214,7 @@ func mint(idx int, privateKeyStr string) error {
 
 	signkey := privateKey
 	address := crypto.PubkeyToAddress(*publicKeyECDSA)
-	conn, err := ethclient.Dial("https://bsc-dataseed1.ninicoin.io")
+	conn, err := ethclient.Dial(cfg.ChainApi)
 	if err != nil {
 		panic(err)
 	}
@@ -144,9 +259,9 @@ func mint(idx int, privateKeyStr string) error {
 	return nil
 }
 
-func batch_trasfer() {
+func batch_trasfer(start, count int) {
 	kdb := Keys{}
-	dbkeys, err := kdb.Scan(MY_STAET_SIZE, MY_BATCH_SIZE)
+	dbkeys, err := kdb.Scan(start, count)
 	if err != nil {
 		panic(err)
 	}
@@ -157,16 +272,13 @@ func batch_trasfer() {
 	}
 
 	fmt.Println(wallets)
-	key := ""
+	key := cfg.PrivateKey
 	privateKey, err := crypto.HexToECDSA(key)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Key init")
-
 	publicKey := privateKey.Public()
-	fmt.Println("use Address: 0x", publicKey)
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
 		panic("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
@@ -174,7 +286,7 @@ func batch_trasfer() {
 
 	signkey := privateKey
 	address := crypto.PubkeyToAddress(*publicKeyECDSA)
-	conn, err := ethclient.Dial("https://bsc-dataseed1.ninicoin.io")
+	conn, err := ethclient.Dial(cfg.ChainApi)
 	if err != nil {
 		panic(err)
 	}
@@ -206,17 +318,17 @@ func batch_trasfer() {
 	}
 
 	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0).Mul(big.NewInt(1500000000000000), big.NewInt(MY_BATCH_SIZE)) // in wei
-	auth.GasLimit = uint64(3000000)                                                         // in units
+	auth.Value = big.NewInt(0).Mul(big.NewInt(1500000000000000), big.NewInt(int64(count))) // in wei
+	auth.GasLimit = uint64(3000000)                                                        // in units
 	auth.GasPrice = gasPrice
 
-	trasfer, err := batchTrasfer.Transfer(auth, wallets, big.NewInt(1500000000000000))
+	_, err = batchTrasfer.Transfer(auth, wallets, big.NewInt(1500000000000000))
 	if err != nil {
+		fmt.Println("trasfer() failed ")
 		panic(err)
 	}
 
-	fmt.Println(trasfer)
-	//NewBatchTrasferTransactor(address common.Address, transactor bind.ContractTransactor)
+	//fmt.Println(trasfer)
 }
 
 type EthClient struct {
@@ -230,12 +342,9 @@ func NewEthClient(conn *ethclient.Client, chain *big.Int) EthClient {
 	}
 }
 
-func create_wallets() {
-	count := 10000
-	if count <= 0 {
-		count = 1000
-	}
-
+func create_wallets(db_name string, count int) {
+	fmt.Println("create address : ", count)
+	openDatabase(db_name)
 	// 生成地址
 	var stopped int32
 	keysChan := make(chan Key, BatchSize)

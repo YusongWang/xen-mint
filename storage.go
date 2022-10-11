@@ -19,7 +19,7 @@ var state struct {
 }
 
 func init() {
-	openDatabase("keys.db")
+	//openDatabase("keys.db")
 }
 
 func openDatabase(path string) {
