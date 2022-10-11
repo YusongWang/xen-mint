@@ -49,12 +49,12 @@ func NewKey() (Key, error) {
 	return Key{Address: address.Hex(), PrivateKey: privateKeyHex}, nil
 }
 
-const MY_STAET_SIZE = 101
+const MY_STAET_SIZE = 451
 const MY_BATCH_SIZE = 50
 
 func main() {
 	batch_mint()
-	// batch_trasfer()
+	//batch_trasfer()
 }
 
 func batch_mint() {
@@ -157,7 +157,7 @@ func batch_trasfer() {
 	}
 
 	fmt.Println(wallets)
-	key := "" //TODO ADD this from env
+	key := ""
 	privateKey, err := crypto.HexToECDSA(key)
 	if err != nil {
 		panic(err)
