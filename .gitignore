@@ -2,4 +2,5 @@ wallet-mint
 .env
 /vendor
 keys.db
+nkeys.db
 

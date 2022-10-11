@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"time"
 
 	"fmt"
 	"log"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/caarlos0/env/v6"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -42,6 +42,8 @@ func (Key) TableName() string {
 }
 
 var cfg config
+
+const CONTRAT_ADDRESS = "0x06450dEe7FD2Fb8E39061434BAbCFC05599a6Fb8"
 
 func main() {
 	godotenv.Load()
@@ -138,6 +140,17 @@ func main() {
 					batch_trasfer(start, count)
 
 					fmt.Printf("success for transfer %d wallet address\n", count)
+					return nil
+				},
+			},
+			{
+				Name:    "time",
+				Aliases: []string{"time"},
+				Usage:   "watch Mint start time",
+				Action: func(cCtx *cli.Context) error {
+					//batch_trasfer(start, count)
+					GenesisTs()
+					//fmt.Printf("success for transfer %d wallet address\n", count)
 					return nil
 				},
 			},
@@ -290,7 +303,7 @@ func mint(idx int, privateKeyStr string) error {
 	}
 
 	client := NewEthClient(conn, chainId)
-	like, err := NewLikeBnb(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
+	like, err := NewLikeBnb(common.HexToAddress(CONTRAT_ADDRESS), conn)
 	if err != nil {
 		return err
 	}
@@ -476,7 +489,7 @@ func watch(start, count int) {
 		panic(err)
 	}
 
-	like, err := NewLikeBnb(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
+	like, err := NewLikeBnb(common.HexToAddress(CONTRAT_ADDRESS), conn)
 	if err != nil {
 		panic(err)
 	}
@@ -488,10 +501,12 @@ func watch(start, count int) {
 		go func() {
 			select {
 			case wallet := <-walletChan:
-				reward, err := like.InnerCalculateMintReward(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
-				if err != nil {
-					panic(err)
-				}
+				//reward, err := like.InnerCalculateMintReward(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
+				// like.
+				// if err != nil {
+				// 	panic(err)
+				// }
+
 				mints, err := like.UserMints(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
 				if err != nil {
 					panic(err)
@@ -500,7 +515,7 @@ func watch(start, count int) {
 				timestamp := mints.MaturityTs.Int64()
 				resChan <- MintResult{
 					Address:  wallet.Address,
-					Balance:  *reward,
+					Balance:  *big.NewInt(0),
 					Deadline: time.Unix(timestamp, 0),
 				}
 			}
@@ -554,4 +569,24 @@ func watch(start, count int) {
 	//table.
 	table.ToCSVFile("res.csv")
 	fmt.Println(res)
+}
+
+func GenesisTs() {
+	//keysChan := make(chan Key, BatchSize)
+	conn, err := ethclient.Dial(cfg.ChainApi)
+	if err != nil {
+		panic(err)
+	}
+
+	like, err := NewLikeBnb(common.HexToAddress(CONTRAT_ADDRESS), conn)
+	if err != nil {
+		panic(err)
+	}
+
+	mints, err := like.GenesisTs(&bind.CallOpts{})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(mints)
 }
