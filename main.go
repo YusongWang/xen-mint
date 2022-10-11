@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/joho/godotenv"
+	"github.com/liushuochen/gotable"
 	"github.com/urfave/cli/v2"
 )
 
@@ -92,9 +93,6 @@ func main() {
 						//ExitProcess()
 						os.Exit(0)
 					}
-					if start <= 10 {
-						start = 1000
-					}
 
 					count_str := cCtx.Args().Get(2)
 					count, err := strconv.Atoi(count_str)
@@ -127,9 +125,6 @@ func main() {
 						//ExitProcess()
 						os.Exit(0)
 					}
-					if start <= 10 {
-						start = 1000
-					}
 
 					count_str := cCtx.Args().Get(2)
 					count, err := strconv.Atoi(count_str)
@@ -144,6 +139,76 @@ func main() {
 
 					fmt.Printf("success for transfer %d wallet address\n", count)
 					return nil
+				},
+			},
+			{
+				Name:    "watch",
+				Aliases: []string{"watch"},
+				Usage:   "watch all wallet balance",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "onece",
+						Usage: "watch onece",
+						Action: func(cCtx *cli.Context) error {
+							if cCtx.Args().Len() < 2 {
+								fmt.Println("Args less then 2, first is dbnamne,seced is wallet count")
+								os.Exit(0)
+							}
+							db_name := cCtx.Args().First()
+							start_str := cCtx.Args().Get(1)
+							start, err := strconv.Atoi(start_str)
+							if err != nil {
+								fmt.Println("error: ", err)
+								//ExitProcess()
+								os.Exit(0)
+							}
+
+							count_str := cCtx.Args().Get(2)
+							count, err := strconv.Atoi(count_str)
+							if err != nil {
+								fmt.Println("error: ", err)
+								//ExitProcess()
+								os.Exit(0)
+							}
+
+							openDatabase(db_name)
+
+							watch(start, count)
+							return nil
+						},
+					},
+					{
+						Name:  "long",
+						Usage: "long time watch",
+						Action: func(cCtx *cli.Context) error {
+							if cCtx.Args().Len() < 2 {
+								fmt.Println("Args less then 2, first is dbnamne,seced is wallet count")
+								os.Exit(0)
+							}
+							db_name := cCtx.Args().First()
+							start_str := cCtx.Args().Get(1)
+							start, err := strconv.Atoi(start_str)
+							if err != nil {
+								fmt.Println("error: ", err)
+								//ExitProcess()
+								os.Exit(0)
+							}
+
+							count_str := cCtx.Args().Get(2)
+							count, err := strconv.Atoi(count_str)
+							if err != nil {
+								fmt.Println("error: ", err)
+								//ExitProcess()
+								os.Exit(0)
+							}
+
+							openDatabase(db_name)
+							for {
+								watch(start, count)
+								time.Sleep(time.Second)
+							}
+						},
+					},
 				},
 			},
 		},
@@ -391,4 +456,102 @@ func create_wallets(db_name string, count int) {
 	}()
 
 	waitGroup.Wait()
+}
+
+type MintResult struct {
+	Address  string
+	Balance  big.Int
+	Deadline time.Time
+}
+
+func watch(start, count int) {
+	//keysChan := make(chan Key, BatchSize)
+	kdb := Keys{}
+	dbkeys, err := kdb.Scan(start, count)
+	if err != nil {
+		panic(err)
+	}
+	conn, err := ethclient.Dial(cfg.ChainApi)
+	if err != nil {
+		panic(err)
+	}
+
+	like, err := NewLikeBnb(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
+	if err != nil {
+		panic(err)
+	}
+
+	var res []MintResult
+	resChan := make(chan MintResult, 1000)
+	walletChan := make(chan Key, 1000)
+	for i := 0; i < 50; i++ {
+		go func() {
+			select {
+			case wallet := <-walletChan:
+				reward, err := like.InnerCalculateMintReward(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
+				if err != nil {
+					panic(err)
+				}
+				mints, err := like.UserMints(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
+				if err != nil {
+					panic(err)
+				}
+
+				timestamp := mints.MaturityTs.Int64()
+				resChan <- MintResult{
+					Address:  wallet.Address,
+					Balance:  *reward,
+					Deadline: time.Unix(timestamp, 0),
+				}
+			}
+		}()
+	}
+
+	for idx := range dbkeys {
+		walletChan <- dbkeys[idx]
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(dbkeys))
+
+	for i := 0; i < len(dbkeys); i++ {
+		go func() {
+			r := <-resChan
+			res = append(res, r)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	// for {
+	// 	select {
+	// 	case
+	//
+	// 		wg.Done()
+	// 	}
+	// }
+
+	table, err := gotable.Create("wallet", "balance", "deadtime")
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	//var tab []map[string]string
+
+	for idx := range res {
+		tag := map[string]string{
+			"wallet":   res[idx].Address,
+			"balance":  res[idx].Balance.String(),
+			"deadtime": res[idx].Deadline.String(),
+		}
+
+		if err := table.AddRow(tag); err != nil {
+			panic(err)
+		}
+	}
+
+	table.OpenBorder()
+	//table.
+	table.ToCSVFile("res.csv")
+	fmt.Println(res)
 }
