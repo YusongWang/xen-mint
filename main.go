@@ -108,6 +108,19 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:    "auto",
+				Aliases: []string{"a"},
+				Usage:   "Factor And Mint",
+				Action: func(cCtx *cli.Context) error {
+
+					if err := buyer(); err != nil {
+						panic(err)
+					}
+
+					return nil
+				},
+			},
 		},
 	}
 
@@ -319,8 +332,9 @@ func deployContract() error {
 	auth.GasPrice = gasPrice
 
 	xenAddr, tx, _, err := DeployProxy(auth, client.conn, big.NewInt(int64(cfg.BuyerNumber)))
+	fmt.Println(err.Error())
 	if err != nil {
-		return err
+		panic(tx)
 	}
 
 	for {
