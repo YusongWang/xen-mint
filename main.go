@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"strings"
+	"time"
 
 	"fmt"
 	"log"
@@ -10,13 +12,25 @@ import (
 	"os"
 
 	"github.com/caarlos0/env/v6"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
 	"github.com/joho/godotenv"
+	"github.com/shopspring/decimal"
 	"github.com/urfave/cli/v2"
 )
+
+func ToDecimal(value *big.Int, decimals int) decimal.Decimal {
+
+	mul := decimal.NewFromFloat(float64(10)).Pow(decimal.NewFromFloat(float64(decimals)))
+	num, _ := decimal.NewFromString(value.String())
+	result := num.Div(mul)
+
+	return result
+}
 
 type config struct {
 	ChainApi        string `env:"URL"`
@@ -58,14 +72,6 @@ func main() {
 		fmt.Printf("%+v\n", err)
 		os.Exit(1)
 	}
-
-	fmt.Println("RPC:", cfg.ChainApi)
-	fmt.Println("合约:", cfg.ContractAddress)
-	fmt.Println("XEN合约:", cfg.XenAddress)
-	fmt.Println("GasLimit:", cfg.GasLimit)
-	fmt.Println("每次预先创建多少钱包:", cfg.BuyerFacter)
-	fmt.Println("一次mint多少钱包:", cfg.BuyerNumber)
-
 	app := &cli.App{
 		Commands: []*cli.Command{
 			{
@@ -143,7 +149,7 @@ func mint() error {
 	}
 
 	client := NewEthClient(conn, chainId)
-	buyer, err := NewBuyer(common.HexToAddress(cfg.ContractAddress), conn)
+	proxy, err := NewProxy(common.HexToAddress(cfg.ContractAddress), conn)
 	if err != nil {
 		return err
 	}
@@ -167,7 +173,7 @@ func mint() error {
 	auth.Value = big.NewInt(0)
 	auth.GasLimit = uint64(cfg.GasLimit) // in units
 	auth.GasPrice = gasPrice
-	tx, err := buyer.Factory(auth, cfg.BuyerFacter)
+	tx, err := proxy.Increase(auth, big.NewInt(int64(cfg.BuyerFacter)))
 	if err != nil {
 		return err
 	}
@@ -204,7 +210,7 @@ func buyer() error {
 	}
 
 	client := NewEthClient(conn, chainId)
-	buyer, err := NewBuyer(common.HexToAddress(cfg.ContractAddress), conn)
+	buyer, err := NewProxy(common.HexToAddress(cfg.ContractAddress), conn)
 	if err != nil {
 		return err
 	}
@@ -228,7 +234,21 @@ func buyer() error {
 	auth.Value = big.NewInt(0)
 	auth.GasLimit = uint64(cfg.GasLimit) // in units
 	auth.GasPrice = gasPrice
-	tx, err := buyer.BuyToken(auth, cfg.BuyerNumber)
+
+	xenABI, err := abi.JSON(strings.NewReader(ABI))
+
+	if err != nil {
+		panic(err)
+	}
+
+	data, err := xenABI.Pack("claimRank", big.NewInt(int64(cfg.Day)))
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(data)
+
+	tx, err := buyer.Execute(auth, big.NewInt(0), big.NewInt(100), common.HexToAddress(cfg.XenAddress), data)
 	if err != nil {
 		return err
 	}
@@ -238,6 +258,7 @@ func buyer() error {
 }
 
 func deployContract() error {
+
 	key := cfg.PrivateKey
 	privateKey, err := crypto.HexToECDSA(key)
 	if err != nil {
@@ -263,11 +284,19 @@ func deployContract() error {
 		panic(err)
 	}
 
+	blockNumber, err := conn.BlockNumber(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	balance, err := conn.BalanceAt(context.Background(), address, big.NewInt(int64(blockNumber)))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Blance:%s \n", ToDecimal(balance, 18))
+
+	//conn.SyncProgress(ctx context.Context)
 	client := NewEthClient(conn, chainId)
-	// buyer, err := NewBuyer(common.HexToAddress(cfg.ContractAddress), conn)
-	// if err != nil {
-	// 	return err
-	// }
 
 	nonce, err := client.conn.PendingNonceAt(context.Background(), address)
 	if err != nil {
@@ -289,12 +318,37 @@ func deployContract() error {
 	auth.GasLimit = uint64(cfg.GasLimit) // in units
 	auth.GasPrice = gasPrice
 
-	xen := common.HexToAddress(cfg.XenAddress)
-	xenAddr, _, _, err := DeployBuyer(auth, client.conn, address, cfg.Day, xen)
+	xenAddr, tx, _, err := DeployProxy(auth, client.conn, big.NewInt(int64(cfg.BuyerNumber)))
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(xenAddr.Hex())
+	for {
+		time.Sleep(time.Second * 3)
+		_, isPeading, err := conn.TransactionByHash(context.Background(), tx.Hash())
+		if err != nil {
+			panic(err)
+		}
+
+		if isPeading {
+			fmt.Println("Wait for confim! ...")
+		} else {
+			fmt.Printf("confim: %s \n address: %s\n", tx.Hash(), xenAddr.Hex())
+			break
+		}
+	}
+
+	blockNumber, err = conn.BlockNumber(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	newbalance, err := conn.BalanceAt(context.Background(), address, big.NewInt(int64(blockNumber)))
+	if err != nil {
+		panic(err)
+	}
+
+	gasUse := big.NewInt(0).Sub(balance, newbalance)
+	fmt.Printf("Blance:%s Gas Use : %s \n", ToDecimal(newbalance, 18), ToDecimal(gasUse, 18).String())
 	return nil
 }

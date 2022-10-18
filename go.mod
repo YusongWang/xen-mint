@@ -6,7 +6,7 @@ require (
 	github.com/caarlos0/env/v6 v6.10.1
 	github.com/ethereum/go-ethereum v1.10.25
 	github.com/joho/godotenv v1.4.0
-	github.com/liushuochen/gotable v0.0.0-20220831134725-cbcd6bb0a5f9
+	github.com/shopspring/decimal v1.3.1
 	github.com/urfave/cli/v2 v2.10.2
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/gorm v1.24.0
