@@ -332,7 +332,6 @@ func deployContract() error {
 	auth.GasPrice = gasPrice
 
 	xenAddr, tx, _, err := DeployProxy(auth, client.conn, big.NewInt(int64(cfg.BuyerNumber)))
-	fmt.Println(err.Error())
 	if err != nil {
 		panic(tx)
 	}
