@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v6"
+	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -290,7 +292,7 @@ func mint(idx int, privateKeyStr string) error {
 	}
 
 	client := NewEthClient(conn, chainId)
-	like, err := NewLikeBnb(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
+	xen, err := NewXen(common.HexToAddress("0xffcbF84650cE02DaFE96926B37a0ac5E34932fa5"), conn)
 	if err != nil {
 		return err
 	}
@@ -300,11 +302,11 @@ func mint(idx int, privateKeyStr string) error {
 		return err
 	}
 
-	gasPrice, err := client.conn.SuggestGasPrice(context.Background())
-	if err != nil {
-		return err
-	}
-
+	/* 	gasPrice, err := client.conn.SuggestGasPrice(context.Background())
+	   	if err != nil {
+	   		return err
+	   	}
+	*/
 	auth, err := bind.NewKeyedTransactorWithChainID(signkey, chainId)
 	if err != nil {
 		return err
@@ -312,10 +314,10 @@ func mint(idx int, privateKeyStr string) error {
 
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = uint64(287959) // in units
-	auth.GasPrice = gasPrice
+	//auth.GasLimit = uint64(287959) // in units
+	//auth.GasPrice = gasPrice
 
-	_, err = like.ClaimRank(auth, big.NewInt(1))
+	_, err = xen.ClaimRank(auth, big.NewInt(15))
 	if err != nil {
 		return err
 	}
@@ -340,9 +342,11 @@ func batch_trasfer(start, count int) {
 	key := cfg.PrivateKey
 	privateKey, err := crypto.HexToECDSA(key)
 	if err != nil {
+
 		panic(err)
 	}
 
+	contract_address := common.HexToAddress("0x5FC490Fb0aE597Bb1d3444dadFE6c12387d29651")
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -362,7 +366,7 @@ func batch_trasfer(start, count int) {
 	}
 
 	client := NewEthClient(conn, chainId)
-	batchTrasfer, err := NewBatchTrasfer(common.HexToAddress("0xf2062ED85949824b72b1fe581D75f0eb9901b783"), conn)
+	batchTrasfer, err := NewBatchTrasfer(contract_address, conn)
 	if err != nil {
 		panic(err)
 	}
@@ -372,22 +376,39 @@ func batch_trasfer(start, count int) {
 		panic(err)
 	}
 
-	gasPrice, err := client.conn.SuggestGasPrice(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
+	/* 	gasPrice, err := client.conn.SuggestGasPrice(context.Background())
+	   	if err != nil {
+	   		panic(err)
+	   	}
+	*/
 	auth, err := bind.NewKeyedTransactorWithChainID(signkey, chainId)
 	if err != nil {
 		panic(err)
 	}
 
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0).Mul(big.NewInt(1500000000000000), big.NewInt(int64(count))) // in wei
-	auth.GasLimit = uint64(3000000)                                                        // in units
-	auth.GasPrice = gasPrice
+	amount := big.NewInt(150000000000000)
 
-	_, err = batchTrasfer.Transfer(auth, wallets, big.NewInt(1500000000000000))
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = big.NewInt(0).Mul(amount, big.NewInt(int64(count))) // in wei
+
+	abi, _ := abi.JSON(strings.NewReader(BatchTrasferABI))
+	data, _ := abi.Pack("transfer", wallets, amount)
+
+	ethRPCParams := ethereum.CallMsg{
+		From:  address,
+		To:    &contract_address,
+		Value: auth.Value,
+		Data:  data,
+	}
+
+	//EmistGas
+	gas_used, err := client.conn.EstimateGas(context.Background(), ethRPCParams)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("gas_used", gas_used)
+	_, err = batchTrasfer.Transfer(auth, wallets, amount)
 	if err != nil {
 		fmt.Println("trasfer() failed ")
 		panic(err)
@@ -476,7 +497,7 @@ func watch(start, count int) {
 		panic(err)
 	}
 
-	like, err := NewLikeBnb(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
+	xen, err := NewXen(common.HexToAddress("0xBDE5AbC1c689BaA94ac91eE1328064c59712418B"), conn)
 	if err != nil {
 		panic(err)
 	}
@@ -488,11 +509,11 @@ func watch(start, count int) {
 		go func() {
 			select {
 			case wallet := <-walletChan:
-				reward, err := like.InnerCalculateMintReward(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
-				if err != nil {
-					panic(err)
-				}
-				mints, err := like.UserMints(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
+				/* 				reward, err := xen.UserMints(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
+				   				if err != nil {
+				   					panic(err)
+				   				} */
+				mints, err := xen.UserMints(&bind.CallOpts{}, common.HexToAddress(wallet.Address))
 				if err != nil {
 					panic(err)
 				}
@@ -500,7 +521,7 @@ func watch(start, count int) {
 				timestamp := mints.MaturityTs.Int64()
 				resChan <- MintResult{
 					Address:  wallet.Address,
-					Balance:  *reward,
+					Balance:  *big.NewInt(0),
 					Deadline: time.Unix(timestamp, 0),
 				}
 			}
